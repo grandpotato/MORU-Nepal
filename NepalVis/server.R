@@ -12,7 +12,9 @@ library(geojsonio)
 library(sp)
 library(jsonlite)
 library(RCurl)
-
+library(data.table)
+library(leaflet)
+library(shinydashboard)
 
 # REad this in as a leaflet sp object
 #https://github.com/leaflet-extras/leaflet-providers
@@ -25,7 +27,7 @@ shinyServer(function(input, output) {
    
   output$leaflet_dangue <- renderLeaflet({
     
-     data_url <- "https://raw.githubusercontent.com/opennepal/odp-health/master/Data%20related%20to%20Communicable%20and%20vector%20borne%20diseases%20(2011-14)/data.csv"
+    data_url <- "https://raw.githubusercontent.com/opennepal/odp-health/master/Data%20related%20to%20Communicable%20and%20vector%20borne%20diseases%20(2011-14)/data.csv"
    
     dt <- read.csv(text = getURL(data_url), header = TRUE)
     dt <- data.table(dt)
@@ -42,24 +44,28 @@ shinyServer(function(input, output) {
     nepal_districts <- readLines(source_URL_Nepal_District, warn = FALSE) %>% paste(collapse = "\n") %>% fromJSON(simplifyMatrix = FALSE)
     
     #this is a mapping key so I can assign the values properly to the JSON table. I'll only edit the names here.To get the values across. But to do it properly I'd use the more "official" naming convention.
-    district_order <- data.table("District.Name" = nepal_districts$objects$nepal$geometries$properties$name, order = seq(1:length(nepal_districts$objects$nepal$geometries$properties$name)))
+    district_order <- data.table("District.Name" = nepal_districts$objects$nepal$geometries$properties$name, order_num = seq(1:length(nepal_districts$objects$nepal$geometries$properties$name)))
     
     #Rename the districts with varying translated names
-    district_order[district_order[, District.Name == "Udayapur"]] <- data.table(District.Name = "Udaypur", order = 1)
-    district_order[district_order[, District.Name == "Terhathum"]] <- "Teharthum"
-    district_order[district_order[, District.Name == "Sindhupalchok"]] <- "Sindhupalchowk"
-    district_order[district_order[, District.Name == "Makwanpur"]] <- "Makawanpur"    
-    district_order[district_order[, District.Name == "Kavrepalanchok"]] <- "Kavre"
-    district_order[district_order[, District.Name == "Kapilbastu"]] <- "Kapilvastu"
-    district_order[district_order[, District.Name == "Dolakha"]] <- "Dolkha"
-    district_order[district_order[, District.Name == "Dhanusa"]] <- "Dhanusha"
-    district_order[district_order[, District.Name == "Bhaktapur"]] <- "Bhaktapur "
+   district_order[District.Name == "Udayapur"]$District.Name <- "Udaypur"
+   district_order[District.Name == "Terhathum"]$District.Name <- "Teharthum"
+   district_order[District.Name == "Sindhupalchok"]$District.Name <- "Sindhupalchowk"
+   district_order[District.Name == "Makwanpur"]$District.Name <- "Makawanpur"    
+   district_order[District.Name == "Kavrepalanchok"]$District.Name <- "Kavre"
+   district_order[District.Name == "Kapilbastu"]$District.Name <- "Kapilvastu"
+   district_order[District.Name == "Dolakha"]$District.Name <- "Dolkha"
+   district_order[District.Name == "Dhanusa"]$District.Name <- "Dhanusha"
+   district_order[District.Name == "Bhaktapur"]$District.Name <- "Bhaktapur "
     
     
     setkey(district_order, District.Name)
     setkey(dt, District.Name)
     
-    merge(district_order, dt, nomatch = 0)
+    #Join the spatial data with the incidence data
+    district_incidence <- merge(district_order, dt, nomatch = 0)[, c("District.Name", "order_num", "Value")]
+    
+    #Order it by the origina district list order in the spatial data
+    nepal_districts$objects$nepal$geometries$properties$value <- district_incidence[order(order_num)]$Value
     
     #default coloring
     nepal_districts$style = list(
@@ -69,11 +75,11 @@ shinyServer(function(input, output) {
       fillOpacity = 0.8
     )
   
-  value_est <- dt$Value  
+  value_est <- nepal_districts$objects$nepal$geometries$properties$value 
     
   value_pal <- colorQuantile("Reds", value_est)    
 
-  nepal_districts$values <- lapply(nepal_districts$values, function(feat) {
+  nepal_districts$objects$nepal$geometries$properties$value <- lapply(nepal_districts$objects$nepal$geometries$properties$value, function(feat) {
     feat$properties$style <- list(
       fillColor = pal(
         feat$properties$value / max(1, feat$properties$value)
